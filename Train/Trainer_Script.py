@@ -4,7 +4,7 @@
 import numpy as np
 import torch
 from torch import nn
-from Model import EEGNet, CCNN, SSVEPNet, FBtCNN, ConvCA, SSVEPformer, DDGCNN
+from Model import EEGNet, CCNN, SSVEPNet, FBtCNN, ConvCA, SSVEPformer, DDGCNN, SSVEPLite
 from Utils import Constraint, LossFunction, Script
 from etc.global_config import config
 
@@ -94,9 +94,9 @@ def data_preprocess(EEGData_Train, EEGData_Test):
 
     # Create DataLoader for the Dataset
     eeg_train_dataloader = torch.utils.data.DataLoader(dataset=EEGData_Train, batch_size=bz, shuffle=True,
-                                                   drop_last=True)
+                                                   drop_last=False)
     eeg_test_dataloader = torch.utils.data.DataLoader(dataset=EEGData_Test, batch_size=bz, shuffle=False,
-                                                   drop_last=True)
+                                                   drop_last=False)
 
     return eeg_train_dataloader, eeg_test_dataloader
 
@@ -117,8 +117,21 @@ def build_model(devices):
     wd = config[algorithm]['wd']
     Nt = int(Fs * ws)
 
+    
+
     if algorithm == "EEGNet":
         net = EEGNet.EEGNet(Nc, Nt, Nf)
+
+    elif algorithm == "SSVEPLite":
+        # params for Model
+        F1 = config[algorithm]['F1']
+        D = config[algorithm]['D']
+        kernelength = config[algorithm]['kernelength']
+        dropout = config[algorithm]['dropout']
+        # print('Nc, Nt, Nf, F1, D, kernelength, dropout',Nc, Nt, Nf, F1, D, kernelength, dropout)
+        net = SSVEPLite.SSVEPLite(num_channels = Nc, T = Nt, num_classes = Nf, F1 = F1,
+                                D = D, kernelength = kernelength, 
+                                dropout = dropout)
 
     elif algorithm == "CCNN":
         net = CCNN.CNN(Nc, 220, Nf)
@@ -152,6 +165,8 @@ def build_model(devices):
     if algorithm == 'SSVEPNet':
         stimulus_type = str(config[algorithm]["stimulus_type"])
         criterion = LossFunction.CELoss_Marginal_Smooth(Nf, stimulus_type=stimulus_type)
+    elif algorithm == 'SSVEPLite':
+        criterion = nn.CrossEntropyLoss()
     else:
         criterion = nn.CrossEntropyLoss(reduction="none")
 

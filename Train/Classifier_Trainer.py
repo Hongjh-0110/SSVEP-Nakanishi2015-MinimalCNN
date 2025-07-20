@@ -4,6 +4,18 @@
 import torch
 import time
 from etc.global_config import config
+import numpy as np
+
+def calc_itr(acc, n_class, trial_time):
+        if acc <= 0 or n_class <= 1:
+            return 0.0
+        if acc >= 1:
+            acc = 0.9999
+        term1 = np.log2(n_class)
+        term2 = acc * np.log2(acc) if acc > 0 else 0
+        term3 = (1 - acc) * np.log2((1 - acc) / (n_class - 1)) if acc < 1 else 0
+        itr = (term1 + term2 + term3) * 60 / trial_time
+        return itr
 
 def train_on_batch(num_epochs, train_iter, test_iter, optimizer, criterion, net, device, lr_jitter=False):
     algorithm = config['algorithm']
@@ -72,5 +84,10 @@ def train_on_batch(num_epochs, train_iter, test_iter, optimizer, criterion, net,
         print(f"epoch{epoch + 1}, train_loss={train_loss:.3f}, train_acc={train_acc:.3f}")
     print(
         f'training finished at {time.strftime("%Y-%m-%d %H:%M:%S", time.localtime())} with final_valid_acc={val_acc:.3f}')
+    # 计算并输出ITR
+    Nf = config["data_param"]["Nf"]
+    ws = config["data_param"]["ws"]
+    itr = calc_itr(float(val_acc), Nf, ws)
+    print(f'final_valid_ITR={itr:.2f} bits/min')
     torch.cuda.empty_cache()
     return val_acc.cpu().data

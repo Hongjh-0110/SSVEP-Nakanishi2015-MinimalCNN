@@ -5,6 +5,13 @@ import matplotlib
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import os
+
+def ensure_dir_exists(file_path):
+    dir_path = os.path.dirname(file_path)
+    if dir_path and not os.path.exists(dir_path):
+        os.makedirs(dir_path)
+
 def plot_save_Result(final_acc_list, model_name, dataset='Benchmark', UD=0, ratio=1, win_size='1', text=True):
     '''
     :param final_acc_list: The final accuracy list
@@ -44,16 +51,62 @@ def plot_save_Result(final_acc_list, model_name, dataset='Benchmark', UD=0, rati
     print("final_mean_list.shape:", final_mean_list.shape)
     print("final_var_list.shape:", final_var_list.shape)
 
-    df_columns = ['Fold' + str(i + 1) for i in range(final_acc_list.shape[0])]
-    df_columns.append('Mean±Std')
-    df = pd.DataFrame(columns=df_columns)
-    for i in range(final_acc_list.shape[0]):
-        fold_acc = np.append(final_acc_list[i], np.mean(final_acc_list[i]))
-        df[('Fold' + str(i + 1))] = [f'{acc * 100:.2f}' for acc in fold_acc]
+    # ==== 新增ITR计算 ====
+    from etc.global_config import config
+    def calc_itr(acc, n_class, trial_time):
+        if acc <= 0 or n_class <= 1:
+            return 0.0
+        if acc >= 1:
+            acc = 0.9999
+        term1 = np.log2(n_class)
+        term2 = acc * np.log2(acc) if acc > 0 else 0
+        term3 = (1 - acc) * np.log2((1 - acc) / (n_class - 1)) if acc < 1 else 0
+        itr = (term1 + term2 + term3) * 60 / trial_time
+        return itr
+    Nf = config["data_param"]["Nf"]
+    ws = config["data_param"]["ws"]
 
-    df['Mean±Std'] = [f'{mean * 100:.2f}±{std * 100:.2f}' for mean, std in zip(final_mean_list, final_var_list)]
-    df.to_csv(f'../Result/{dataset}/{model_name}/{proportion}_{val_way}_Classification_Result({win_size}S).csv',
-              index=False)
+    # 计算每个Fold和Mean的ITR
+    itr_matrix = np.zeros_like(final_acc_list)
+    for i in range(final_acc_list.shape[0]):
+        for j in range(final_acc_list.shape[1]):
+            itr_matrix[i, j] = calc_itr(final_acc_list[i, j], Nf, ws)
+    mean_acc = np.mean(final_acc_list, axis=0)
+    mean_itr = np.mean(itr_matrix, axis=0)
+    std_acc = np.std(final_acc_list, ddof=1, axis=0)
+    std_itr = np.std(itr_matrix, ddof=1, axis=0)
+
+    # 增加Mean±Std
+    mean_acc = np.append(mean_acc, np.mean(mean_acc))
+    std_acc = np.append(std_acc, np.std(mean_acc, ddof=1))
+    mean_itr = np.append(mean_itr, np.mean(mean_itr))
+    std_itr = np.append(std_itr, np.std(mean_itr, ddof=1))
+
+    # ==== LOSO格式csv输出 ====
+    subjects = [f'Subject{i+1}' for i in range(final_acc_list.shape[1])]
+    rows = []
+    for j in range(final_acc_list.shape[1]):
+        accs = final_acc_list[:, j]
+        itrs = [calc_itr(acc, Nf, ws) for acc in accs]
+        # LOSO下每个subject只会有一条acc
+        rows.append({
+            'Subject': subjects[j],
+            'Acc (%)': f'{accs[0]*100:.2f}',
+            'ITR (bits/min)': f'{itrs[0]:.2f}'
+        })
+    # 计算均值±方差
+    all_accs = final_acc_list.flatten()
+    all_itrs = [calc_itr(acc, Nf, ws) for acc in all_accs]
+    rows.append({
+        'Subject': 'Mean±Std',
+        'Acc (%)': f'{np.mean(all_accs)*100:.2f}±{np.std(all_accs, ddof=1)*100:.2f}',
+        'ITR (bits/min)': f'{np.mean(all_itrs):.2f}±{np.std(all_itrs, ddof=1):.2f}'
+    })
+    import pandas as pd
+    df = pd.DataFrame(rows)
+    csv_path = f'../Result/{dataset}/{model_name}/{proportion}_{val_way}_Classification_Result({win_size}S).csv'
+    ensure_dir_exists(csv_path)
+    df.to_csv(csv_path, index=False, encoding='utf-8-sig')
 
 
     data1 = final_mean_list
@@ -107,5 +160,7 @@ def plot_save_Result(final_acc_list, model_name, dataset='Benchmark', UD=0, rati
            else:
                plt.text(a[i] - delta * 6.0, data1[i] + delta * 0.1,
                         f'{final_mean_list[-1] * 100:.2f}±{final_var_list[-1] * 100:.2f}', color='r')
-    plt.savefig(f'../Result/{dataset}/{model_name}/{proportion}_{val_way}_Classification_Result({win_size}S).png')
+    img_path = f'../Result/{dataset}/{model_name}/{proportion}_{val_way}_Classification_Result({win_size}S).png'
+    ensure_dir_exists(img_path)
+    plt.savefig(img_path)
     plt.show()
